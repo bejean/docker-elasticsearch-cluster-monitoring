@@ -1,0 +1,71 @@
+version: '2.4'
+services:
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
+    container_name: ${CONTAINER_ROOT_NAME}01
+    environment:
+      - node.name=${CONTAINER_ROOT_NAME}01
+      - cluster.name=${CLUSTER_NAME}
+      - discovery.seed_hosts=${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
+      - cluster.initial_master_nodes=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data01:/usr/share/elasticsearch/data
+    ports:
+      - 127.0.0.1:9200:9200
+    networks:
+      - elastic
+  es02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
+    container_name: ${CONTAINER_ROOT_NAME}02
+    environment:
+      - node.name=${CONTAINER_ROOT_NAME}02
+      - cluster.name=${CLUSTER_NAME}
+      - discovery.seed_hosts=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}03
+      - cluster.initial_master_nodes=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data02:/usr/share/elasticsearch/data
+    networks:
+      - elastic
+  es03:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
+    container_name: ${CONTAINER_ROOT_NAME}03
+    environment:
+      - node.name=${CONTAINER_ROOT_NAME}03
+      - cluster.name=${CLUSTER_NAME}
+      - discovery.seed_hosts=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02
+      - cluster.initial_master_nodes=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data03:/usr/share/elasticsearch/data
+    networks:
+      - elastic
+
+volumes:
+  data01:
+    driver: local
+  data02:
+    driver: local
+  data03:
+    driver: local
+
+networks:
+  elastic:
+    driver: bridge
+

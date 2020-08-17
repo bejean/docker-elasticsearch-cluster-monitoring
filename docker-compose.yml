@@ -1,15 +1,29 @@
 version: '2.4'
+#https://www.elastic.co/guide/en/elasticsearch/reference/current/docker.html
 services:
+
+#
+# ES production cluster 
+#
   es01:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
-    container_name: ${CONTAINER_ROOT_NAME}01
+    container_name: ${COMPOSE_PROJECT_NAME}_es01
     environment:
-      - node.name=${CONTAINER_ROOT_NAME}01
-      - cluster.name=${CLUSTER_NAME}
-      - discovery.seed_hosts=${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
-      - cluster.initial_master_nodes=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
+      - node.name=es01
+      - cluster.name=${ES_CLUSTER_NAME}
+      - discovery.seed_hosts=es02,es03
+      - cluster.initial_master_nodes=es01,es02,es03
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+      - http.cors.enabled=true
+      #- http.cors.allow-origin=http://localhost:1358,http://127.0.0.1:1358
+      - http.cors.allow-origin=*
+      - http.cors.allow-headers=X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization
+      - http.cors.allow-credentials=true
+      - xpack.monitoring.collection.enabled=true
+      - xpack.monitoring.elasticsearch.collection.enabled=false
+      - xpack.license.self_generated.type=${ES_XPACK_LICENCE}
+      - xpack.security.enabled=false
     ulimits:
       memlock:
         soft: -1
@@ -19,17 +33,23 @@ services:
     ports:
       - 127.0.0.1:9200:9200
     networks:
-      - elastic
+      - net_elastic2
+    restart: unless-stopped
+
   es02:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
-    container_name: ${CONTAINER_ROOT_NAME}02
+    container_name: ${COMPOSE_PROJECT_NAME}_es02
     environment:
-      - node.name=${CONTAINER_ROOT_NAME}02
-      - cluster.name=${CLUSTER_NAME}
-      - discovery.seed_hosts=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}03
-      - cluster.initial_master_nodes=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
+      - node.name=es02
+      - cluster.name=${ES_CLUSTER_NAME}
+      - discovery.seed_hosts=es01,es03
+      - cluster.initial_master_nodes=es01,es02,es03
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+      - xpack.monitoring.collection.enabled=true
+      - xpack.monitoring.elasticsearch.collection.enabled=false
+      - xpack.license.self_generated.type=${ES_XPACK_LICENCE}
+      - xpack.security.enabled=false
     ulimits:
       memlock:
         soft: -1
@@ -37,17 +57,23 @@ services:
     volumes:
       - data02:/usr/share/elasticsearch/data
     networks:
-      - elastic
+      - net_elastic2
+    restart: unless-stopped
+
   es03:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
-    container_name: ${CONTAINER_ROOT_NAME}03
+    container_name: ${COMPOSE_PROJECT_NAME}_es03
     environment:
-      - node.name=${CONTAINER_ROOT_NAME}03
-      - cluster.name=${CLUSTER_NAME}
-      - discovery.seed_hosts=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02
-      - cluster.initial_master_nodes=${CONTAINER_ROOT_NAME}01,${CONTAINER_ROOT_NAME}02,${CONTAINER_ROOT_NAME}03
+      - node.name=es03
+      - cluster.name=${ES_CLUSTER_NAME}
+      - discovery.seed_hosts=es01,es02
+      - cluster.initial_master_nodes=es01,es02,es03
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+      - xpack.monitoring.collection.enabled=true
+      - xpack.monitoring.elasticsearch.collection.enabled=false
+      - xpack.license.self_generated.type=${ES_XPACK_LICENCE}
+      - xpack.security.enabled=false
     ulimits:
       memlock:
         soft: -1
@@ -55,7 +81,182 @@ services:
     volumes:
       - data03:/usr/share/elasticsearch/data
     networks:
-      - elastic
+      - net_elastic2
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ES_VERSION}
+    container_name: ${COMPOSE_PROJECT_NAME}_kibana
+    volumes:
+      - type: bind
+        source: ./kibana/config/kibana.yml
+        target: /usr/share/kibana/config/kibana.yml
+        read_only: true
+    ports:
+      - "5601:5601"
+    networks:
+      - net_elastic2
+    depends_on:
+      - es01
+    restart: unless-stopped
+
+  metricbeat_system:
+    container_name: ${COMPOSE_PROJECT_NAME}_metricbeat
+    #hostname: metricbeat
+    user: root #To read the docker socket
+    image: docker.elastic.co/beats/metricbeat:${ES_VERSION}
+    logging:
+      options:
+        max-file: "3"
+        max-size: "50m"
+    volumes:
+      #Mount the metricbeat configuration so users can make edits.
+      - ./metricbeats/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml
+      #Mount the modules.d directory into the container. This allows user to potentially make changes to the modules and they will be dynamically loaded.
+      - ./metricbeats/modules.d/system.yml:/usr/share/metricbeat/modules.d/system.yml
+      #The commented sections below enable Metricbeat to monitor the Docker host rather than the Metricbeat container. These are used by the system module.
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      #Allows us to report on docker from the hosts information.
+      - /var/run/docker.sock:/var/run/docker.sock
+      #We mount the host filesystem so we can report on disk usage with the system module.
+      - /:/hostfs:ro
+    command: metricbeat -e -system.hostfs=/hostfs -strict.perms=false
+    networks:
+      - net_elastic2
+    restart: on-failure
+    depends_on:
+      mon-kibana:
+          condition: service_healthy
+    #  elasticsearch:  { condition: service_healthy }
+
+  metricbeat_es:
+    container_name: ${COMPOSE_PROJECT_NAME}_metricbeat_es
+    #hostname: metricbeat_es
+    user: root #To read the docker socket
+    image: docker.elastic.co/beats/metricbeat:${ES_VERSION}
+    logging:
+      options:
+        max-file: "3"
+        max-size: "50m"
+    volumes:
+      #Mount the metricbeat configuration so users can make edits.
+      - ./metricbeats/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml
+      #Mount the modules.d directory into the container. This allows user to potentially make changes to the modules and they will be dynamically loaded.
+      - ./metricbeats/modules.d/es.yml:/usr/share/metricbeat/modules.d/es.yml
+      #The commented sections below enable Metricbeat to monitor the Docker host rather than the Metricbeat container. These are used by the system module.
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      #Allows us to report on docker from the hosts information.
+      - /var/run/docker.sock:/var/run/docker.sock
+      #We mount the host filesystem so we can report on disk usage with the system module.
+      - /:/hostfs:ro
+    command: metricbeat -e -system.hostfs=/hostfs -strict.perms=false
+    networks:
+      - net_elastic2
+    restart: on-failure
+    depends_on:
+      mon-kibana:
+          condition: service_healthy
+    #  elasticsearch:  { condition: service_healthy }
+
+#
+# ES monitoring cluster 
+#
+  mon-es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
+    container_name: ${COMPOSE_PROJECT_NAME}_mon-es01
+    hostname: mon-es01
+    environment:
+      - node.name=mon-es01
+      - cluster.name=${ES_CLUSTER_NAME}-mon
+      - discovery.seed_hosts=mon-es02
+      - cluster.initial_master_nodes=mon-es01,mon-es02
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+      - http.cors.enabled=true
+      #- http.cors.allow-origin=http://localhost:1358,http://127.0.0.1:1358
+      - http.cors.allow-origin=*
+      - http.cors.allow-headers=X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization
+      - http.cors.allow-credentials=true
+      - xpack.monitoring.collection.enabled=false
+      - xpack.monitoring.elasticsearch.collection.enabled=false
+      - xpack.license.self_generated.type=${ES_XPACK_LICENCE}
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - mondata01:/usr/share/elasticsearch/data
+    ports:
+      - 127.0.0.1:9201:9200
+    networks:
+      - net_elastic2
+    restart: unless-stopped
+
+  mon-es02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
+    container_name: ${COMPOSE_PROJECT_NAME}_mon-es02
+    environment:
+      - node.name=mon-es02
+      - cluster.name=${ES_CLUSTER_NAME}-mon
+      - discovery.seed_hosts=mon-es01
+      - cluster.initial_master_nodes=mon-es01,mon-es02
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS}"
+      - xpack.monitoring.collection.enabled=false
+      - xpack.monitoring.elasticsearch.collection.enabled=false
+      - xpack.license.self_generated.type=${ES_XPACK_LICENCE}
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - mondata02:/usr/share/elasticsearch/data
+    networks:
+      - net_elastic2
+    restart: unless-stopped
+
+  mon-kibana:
+    image: docker.elastic.co/kibana/kibana:${ES_VERSION}
+    container_name: ${COMPOSE_PROJECT_NAME}_mon-kibana
+    #hostname: mon-kibana
+    volumes:
+      - type: bind
+        source: ./kibana-monitoring/config/kibana.yml
+        target: /usr/share/kibana/config/kibana.yml
+        read_only: true
+    ports:
+      - "5602:5601"
+    networks:
+      - net_elastic2
+    depends_on:
+      - mon-es01
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+      start_period: 1m
+
+#
+# Extra
+#
+  eshead:
+    image: marlic/elasticsearch-head
+    container_name: ${COMPOSE_PROJECT_NAME}_eshead
+    ports:
+      - 127.0.0.1:9100:80
+    networks:
+      - net_elastic2
+    depends_on:
+      - es01
+      - mon-es01
+    restart: unless-stopped
+
 
 volumes:
   data01:
@@ -64,8 +265,13 @@ volumes:
     driver: local
   data03:
     driver: local
+  mondata01:
+    driver: local
+  mondata02:
+    driver: local
 
 networks:
-  elastic:
+  net_elastic2:
     driver: bridge
 
+#https://hub.docker.com/r/blacktop/elasticsearch

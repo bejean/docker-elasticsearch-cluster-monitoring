@@ -1,0 +1,15 @@
+metricbeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.period: 5s
+  reload.enabled: true
+processors:
+- add_docker_metadata: ~
+monitoring.enabled: true
+setup.ilm.enabled: false
+output.elasticsearch:
+  hosts: ["mon-es01:9200"]
+  
+logging.to_files: false
+setup:
+  kibana.host: "mon-kibana:5601"
+  dashboards.enabled: true
